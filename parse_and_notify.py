@@ -383,14 +383,32 @@ def post_combined_slack(
 
     m3_label = epm_months[2] if epm_months else "Feb"
 
+    # Build report period note from filenames
+    def _report_date(filepath, ext):
+        base = os.path.basename(filepath)
+        date_str = base[-13:-5] if ext == "xlsx" else base[-12:-4]
+        try:
+            return datetime.strptime(date_str, "%Y%m%d")
+        except Exception:
+            return None
+
+    erp_dt  = _report_date(erp_file, "xlsx")
+    epm_dt  = _report_date(epm_file, "pdf")
+    erp_note = f"ERP: uploaded {erp_dt.strftime('%B %-d')} → covers {erp_months[0]} / {erp_months[1]} / {erp_months[2]}" if erp_dt else ""
+    epm_note = f"EPM: uploaded {epm_dt.strftime('%B %-d')} → covers {epm_months[0]} / {epm_months[1]} / {epm_months[2]}" if epm_dt else ""
+
     blocks = [
         {
             "type": "header",
-            "text": {"type": "plain_text", "text": f"Reminder - Monthly Oracle SaaS License Usage - {PREV_MONTH}"}
+            "text": {"type": "plain_text", "text": f"Reminder - Monthly Oracle SaaS License Usage"}
         },
         {
             "type": "section",
-            "text": {"type": "mrkdwn", "text": f"{ticket_line}\n\n*Tickets and assignees please take action.*"}
+            "text": {"type": "mrkdwn", "text": f"_{erp_note}_\n_{epm_note}_"}
+        },
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*Assignees please take action:* {ticket_line}"}
         },
         {"type": "divider"},
         # ERP
@@ -421,32 +439,12 @@ def post_combined_slack(
         "text": {"type": "mrkdwn", "text": f"*EPM / FCCS-EDM* — {epm_months[0]} / {epm_months[1]} / {epm_months[2]}\n```{fccs_table}```"}
     })
 
-    # Hosted Employee
-    if employee:
-        blocks.append({
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": f"*Hosted Employee (EDM)* — {employee['m1']} / {employee['m2']} / {employee['m3']}\n```{_employee_table(employee, m3_label)}```"}
-        })
-
     # FCCS-EDM per-instance detail
     if fccs_detail:
         blocks.append({
             "type": "section",
             "text": {"type": "mrkdwn", "text": f"*FCCS-EDM — Detailed Usage by Environment ({m3_label})*\n```{_detail_table(fccs_detail, m3_label)}```"}
         })
-
-    if all_alerts:
-        blocks.append({
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": "*⚠️ Services at 90%+ utilization:*\n" + "\n".join(all_alerts)}
-        })
-
-    blocks.append({
-        "type": "context",
-        "elements": [{"type": "mrkdwn", "text": (
-            f"ERP: `{os.path.basename(erp_file)}`  |  EPM: `{os.path.basename(epm_file)}`"
-        )}]
-    })
 
     resp = requests.post(
         "https://slack.com/api/chat.postMessage",
