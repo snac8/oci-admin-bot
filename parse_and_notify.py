@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 """
 parse_and_notify.py
-Parses Oracle SaaS Usage Metrics reports (ERP Excel + EPM PDF) and posts
-formatted summaries to a Slack channel via the fbs-admin bot.
+Parses Oracle SaaS Usage Metrics reports (ERP Excel + EPM PDF), creates Jira
+tickets, attaches reports, and posts a combined summary to Slack.
 
-Required environment variables:
-  SLACK_BOT_TOKEN  - Slack bot token (xoxb-...)
-  SLACK_CHANNEL    - Slack channel name (default: #test-ai)
-  SAAS_USAGE_DIR   - Directory containing downloaded files
-                     (default: /Users/sindhun/oci/saas-usage)
+Required environment variables (set in /etc/fbs-admin/secrets.env):
+  SLACK_BOT_TOKEN       - Slack bot token (xoxb-...)
+  SLACK_CHANNEL         - Slack channel (default: #test-ai)
+  SAAS_USAGE_DIR        - Directory with downloaded files
+  JIRA_EMAIL            - Atlassian account email
+  JIRA_TOKEN            - Jira API token
+  JIRA_ASSIGNEE_ERP     - Jira account ID for ERP assignee
+  JIRA_ASSIGNEE_EPBCS   - Jira account ID for EPBCS assignee
+  JIRA_ASSIGNEE_FCCS_EDM- Jira account ID for FCCS-EDM assignee
+  SLACK_USER_ERP        - Slack email for ERP assignee (for @mention)
+  SLACK_USER_EPBCS      - Slack email for EPBCS assignee
+  SLACK_USER_FCCS_EDM   - Slack email for FCCS-EDM assignee
 """
 
 import os
@@ -16,15 +23,35 @@ import re
 import sys
 import glob
 import warnings
+from datetime import datetime, date
+from dateutil.relativedelta import relativedelta
 import requests
 import openpyxl
 import pdfplumber
 
 warnings.filterwarnings("ignore")
 
-SLACK_BOT_TOKEN = os.environ.get("SLACK_BOT_TOKEN")
-SLACK_CHANNEL = os.environ.get("SLACK_CHANNEL", "#test-ai")
-SAAS_USAGE_DIR = os.environ.get("SAAS_USAGE_DIR", "/Users/sindhun/oci/saas-usage")
+# --- Config ---
+SLACK_BOT_TOKEN   = os.environ.get("SLACK_BOT_TOKEN")
+SLACK_CHANNEL     = os.environ.get("SLACK_CHANNEL", "#test-ai")
+SAAS_USAGE_DIR    = os.environ.get("SAAS_USAGE_DIR", "/Users/sindhun/oci/saas-usage")
+JIRA_BASE         = "https://block.atlassian.net"
+JIRA_EMAIL        = os.environ.get("JIRA_EMAIL", "sindhun@block.xyz")
+JIRA_TOKEN        = os.environ.get("JIRA_TOKEN", "")
+JIRA_PROJECT      = "FBS"
+JIRA_ISSUE_TYPE   = "10005"   # Task
+JIRA_PRIORITY     = "10005"   # P3
+JIRA_COMP_ERP         = "38102"
+JIRA_COMP_EPBCS       = "38103"
+JIRA_COMP_FCCS_EDM    = "38104"
+JIRA_ASSIGNEE_ERP       = os.environ.get("JIRA_ASSIGNEE_ERP",       "712020:68edc5a8-7a36-4d36-9680-ea796a67a4d2")
+JIRA_ASSIGNEE_EPBCS     = os.environ.get("JIRA_ASSIGNEE_EPBCS",     "712020:68edc5a8-7a36-4d36-9680-ea796a67a4d2")
+JIRA_ASSIGNEE_FCCS_EDM  = os.environ.get("JIRA_ASSIGNEE_FCCS_EDM",  "712020:68edc5a8-7a36-4d36-9680-ea796a67a4d2")
+SLACK_USER_ERP      = os.environ.get("SLACK_USER_ERP",      "sindhun@block.xyz")
+SLACK_USER_EPBCS    = os.environ.get("SLACK_USER_EPBCS",    "sindhun@block.xyz")
+SLACK_USER_FCCS_EDM = os.environ.get("SLACK_USER_FCCS_EDM", "sindhun@block.xyz")
+
+PREV_MONTH = (date.today().replace(day=1) - relativedelta(months=1)).strftime("%B %Y")
 
 
 # ---------------------------------------------------------------------------
@@ -42,33 +69,24 @@ def find_latest_erp_report():
 def parse_erp_report(filepath):
     wb = openpyxl.load_workbook(filepath)
     ws = wb["Usage Summary"]
-
     rows = list(ws.iter_rows(values_only=True))
-
     month_row = rows[4]
     month1 = str(month_row[3]).strip() if month_row[3] else "M1"
     month2 = str(month_row[4]).strip() if month_row[4] else "M2"
     month3 = str(month_row[5]).strip() if month_row[5] else "M3"
-
     services = []
     for row in rows[5:]:
-        part = row[1]
-        service = row[2]
-        m1 = row[3]
-        m2 = row[4]
-        m3 = row[5]
-        subscribed = row[6]
-        remaining = row[7]
-        utilization = row[8]
-
+        part, service, m1, m2, m3 = row[1], row[2], row[3], row[4], row[5]
+        subscribed, remaining, utilization = row[6], row[7], row[8]
         if not part or not service or not isinstance(m3, (int, float)):
             continue
-
-        name = str(service).strip().replace("Oracle Fusion ", "").replace(" Cloud Service - Hosted Named User", "").replace(" Cloud Service - Hosted 1,000 Records", " (1K Records)").replace("\n", "")
-
+        name = (str(service).strip()
+                .replace("Oracle Fusion ", "")
+                .replace(" Cloud Service - Hosted Named User", "")
+                .replace(" Cloud Service - Hosted 1,000 Records", " (1K Records)")
+                .replace("\n", ""))
         services.append({
-            "part": str(part).strip(),
-            "name": name,
+            "part": str(part).strip(), "name": name,
             "m1": int(m1) if m1 is not None else 0,
             "m2": int(m2) if m2 is not None else 0,
             "m3": int(m3) if m3 is not None else 0,
@@ -76,61 +94,7 @@ def parse_erp_report(filepath):
             "remaining": int(remaining) if remaining is not None else 0,
             "utilization": float(utilization) if utilization is not None else 0.0,
         })
-
     return month1, month2, month3, services
-
-
-def format_erp_slack_blocks(filename, month1, month2, month3, services):
-    basename = os.path.basename(filename)
-    date_str = basename[-13:-5]
-    try:
-        from datetime import datetime
-        report_date = datetime.strptime(date_str, "%Y%m%d").strftime("%B %Y")
-    except Exception:
-        report_date = date_str
-
-    header = f"{'Service':<42} {month1:>5} {month2:>5} {month3:>5}  {'Sub':>5}  {'Util':>6}"
-    divider = "─" * len(header)
-
-    lines = [header, divider]
-    alerts = []
-    for s in services:
-        util_pct = f"{s['utilization']*100:.0f}%"
-        flag = " ⚠️" if s["utilization"] >= 0.90 else ""
-        line = f"{s['name'][:42]:<42} {s['m1']:>5} {s['m2']:>5} {s['m3']:>5}  {s['subscribed']:>5}  {util_pct:>6}{flag}"
-        lines.append(line)
-        if s["utilization"] >= 0.90:
-            alerts.append(f"• *{s['name']}*: {util_pct} utilized ({s['m3']} of {s['subscribed']})")
-
-    table = "\n".join(lines)
-
-    blocks = [
-        {
-            "type": "header",
-            "text": {"type": "plain_text", "text": f"Oracle ERP Usage Report — {report_date}"}
-        },
-        {
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": f"_Rolling 3 months: {month1} / {month2} / {month3}_"}
-        },
-        {
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": f"```{table}```"}
-        },
-    ]
-
-    if alerts:
-        blocks.append({
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": "*⚠️ Services at 90%+ utilization:*\n" + "\n".join(alerts)}
-        })
-
-    blocks.append({
-        "type": "context",
-        "elements": [{"type": "mrkdwn", "text": f"Source: `{basename}`"}]
-    })
-
-    return blocks
 
 
 # ---------------------------------------------------------------------------
@@ -139,157 +103,260 @@ def format_erp_slack_blocks(filename, month1, month2, month3, services):
 
 def find_latest_epm_report():
     files = sorted(glob.glob(os.path.join(SAAS_USAGE_DIR, "SaaS_Service_Usage_Metrics_EPM_*.pdf")))
-    if not files:
-        return None
-    return files[-1]
+    return files[-1] if files else None
 
 
 def _shorten_epm_name(raw):
-    # Take first non-empty line (avoids instance IDs like EHSG.PLAN1)
-    first_line = raw.split("\n")[0].strip()
-    first_line = first_line.replace("Oracle Enterprise Performance Management ", "EPM ")
-    first_line = first_line.replace("Oracle Additional Application for Oracle Enterprise", "EPM Additional")
-    first_line = first_line.replace("Oracle Enterprise Data Management", "EDM")
-    first_line = first_line.replace("Performance Management Enterprise Cloud Service -", "")
-    first_line = first_line.replace(" Cloud Service", "")
-    first_line = re.sub(r"\s+", " ", first_line).strip()
-    return first_line
+    lines = [l.strip() for l in raw.split("\n") if l.strip() and not l.strip().startswith("EHSG")]
+    name = " - ".join(lines[:2])
+    name = re.sub(r"Oracle Enterprise Performance Management\s*", "EPM ", name)
+    name = re.sub(r"Oracle Additional Application for Oracle Enterprise\s*", "EPM Additional - ", name)
+    name = re.sub(r"Oracle Enterprise Data Management\s*\(EDM\)", "EDM", name)
+    name = re.sub(r"Oracle Enterprise Data Management", "EDM", name)
+    name = re.sub(r"Performance Management Enterprise Cloud Service\s*-?\s*", "", name)
+    name = re.sub(r"\s*Cloud Service\s*-?\s*", " - ", name)
+    name = name.replace("Hosted ", "")
+    name = re.sub(r"\s*-\s*-\s*", " - ", name)  # collapse double dashes
+    return re.sub(r"\s+", " ", name).strip(" -")
 
 
 def parse_epm_report(filepath):
-    services = []
-    months = None
-
+    services, months = [], None
     with pdfplumber.open(filepath) as pdf:
         for page in pdf.pages:
-            tables = page.extract_tables()
-            for table in tables:
+            for table in page.extract_tables():
                 if len(table) < 3:
                     continue
-                header = table[0]
-                sub_header = table[1]
-
-                # Only process tables with subscription utilization data
-                if not any("Utilization" in str(h) for h in header if h):
+                if not any("Utilization" in str(h) for h in table[0] if h):
                     continue
-
                 if months is None:
+                    sub = table[1]
                     months = (
-                        str(sub_header[2]).strip() if sub_header[2] else "M1",
-                        str(sub_header[3]).strip() if sub_header[3] else "M2",
-                        str(sub_header[4]).strip() if sub_header[4] else "M3",
+                        str(sub[2]).strip() if sub[2] else "M1",
+                        str(sub[3]).strip() if sub[3] else "M2",
+                        str(sub[4]).strip() if sub[4] else "M3",
                     )
-
                 for row in table[2:]:
-                    part = row[0]
-                    service = row[1]
+                    part, service = row[0], row[1]
                     if not part or not service:
                         continue
-
                     try:
                         m1 = float(str(row[2]).replace(",", "")) if row[2] else 0
                         m2 = float(str(row[3]).replace(",", "")) if row[3] else 0
                         m3 = float(str(row[4]).replace(",", "")) if row[4] else 0
                         subscribed = float(str(row[5]).replace(",", "")) if row[5] else 0
                         remaining = float(str(row[6]).replace(",", "")) if row[6] else 0
-                        util_str = str(row[7]).replace("%", "").strip() if row[7] else "0"
-                        utilization = float(util_str) / 100
+                        utilization = float(str(row[7]).replace("%", "").strip()) / 100 if row[7] else 0
                     except (ValueError, TypeError, IndexError):
                         continue
-
                     services.append({
                         "part": str(part).strip(),
                         "name": _shorten_epm_name(str(service)),
-                        "m1": m1,
-                        "m2": m2,
-                        "m3": m3,
-                        "subscribed": subscribed,
-                        "remaining": remaining,
+                        "m1": m1, "m2": m2, "m3": m3,
+                        "subscribed": subscribed, "remaining": remaining,
                         "utilization": utilization,
                     })
-
     return months, services
 
 
-def format_epm_slack_blocks(filename, months, services):
-    basename = os.path.basename(filename)
-    date_str = basename[-12:-4]  # 20260327
-    try:
-        from datetime import datetime
-        report_date = datetime.strptime(date_str, "%Y%m%d").strftime("%B %Y")
-    except Exception:
-        report_date = date_str
+def _split_epm(services):
+    """Split EPM services by part number: B91074 (Hosted Named User) → EPBCS; rest → FCCS-EDM."""
+    epbcs = [s for s in services if s["part"] == "B91074"]
+    fccs_edm = [s for s in services if s["part"] != "B91074"]
+    return epbcs, fccs_edm
 
-    month1, month2, month3 = months if months else ("M1", "M2", "M3")
 
-    header = f"{'Service':<42} {month1:>5} {month2:>5} {month3:>5}  {'Sub':>6}  {'Util':>6}"
+# ---------------------------------------------------------------------------
+# Jira
+# ---------------------------------------------------------------------------
+
+def _jira_auth():
+    return (JIRA_EMAIL, JIRA_TOKEN)
+
+
+def _build_jira_desc(intro, months, services, fmt_val=None):
+    """Build ADF description with a usage table."""
+    header = f"{'Service':<42} {months[0]:>5} {months[1]:>5} {months[2]:>5}  {'Sub':>6}  {'Util':>6}"
     divider = "─" * len(header)
-
     lines = [header, divider]
-    alerts = []
     for s in services:
         util_pct = f"{s['utilization']*100:.0f}%"
-        flag = " ⚠️" if s["utilization"] >= 0.90 else ""
-        m1_str = f"{s['m1']:.0f}" if isinstance(s['m1'], float) and s['m1'] == int(s['m1']) else f"{s['m1']}"
-        m2_str = f"{s['m2']:.0f}" if isinstance(s['m2'], float) and s['m2'] == int(s['m2']) else f"{s['m2']}"
-        m3_str = f"{s['m3']:.0f}" if isinstance(s['m3'], float) and s['m3'] == int(s['m3']) else f"{s['m3']}"
-        sub_str = f"{s['subscribed']:.0f}" if isinstance(s['subscribed'], float) and s['subscribed'] == int(s['subscribed']) else f"{s['subscribed']}"
-        line = f"{s['name'][:42]:<42} {m1_str:>5} {m2_str:>5} {m3_str:>5}  {sub_str:>6}  {util_pct:>6}{flag}"
-        lines.append(line)
-        if s["utilization"] >= 0.90:
-            alerts.append(f"• *{s['name']}*: {util_pct} utilized ({s['m3']} of {s['subscribed']})")
+        flag = " ⚠" if s["utilization"] >= 0.90 else ""
+        v1 = fmt_val(s["m1"]) if fmt_val else str(s["m1"])
+        v2 = fmt_val(s["m2"]) if fmt_val else str(s["m2"])
+        v3 = fmt_val(s["m3"]) if fmt_val else str(s["m3"])
+        sub = fmt_val(s["subscribed"]) if fmt_val else str(s["subscribed"])
+        lines.append(f"{s['name'][:42]:<42} {v1:>5} {v2:>5} {v3:>5}  {sub:>6}  {util_pct:>6}{flag}")
+    table_text = "\n".join(lines)
+    return {
+        "type": "doc", "version": 1,
+        "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": intro}]},
+            {"type": "codeBlock", "attrs": {"language": ""},
+             "content": [{"type": "text", "text": table_text}]},
+        ]
+    }
 
-    table = "\n".join(lines)
 
-    blocks = [
-        {
-            "type": "header",
-            "text": {"type": "plain_text", "text": f"Oracle EPM Usage Report — {report_date}"}
-        },
-        {
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": f"_Rolling 3 months: {month1} / {month2} / {month3}_"}
-        },
-        {
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": f"```{table}```"}
-        },
-    ]
+def create_jira_ticket(summary, component_id, assignee_id, description):
+    resp = requests.post(
+        f"{JIRA_BASE}/rest/api/3/issue",
+        auth=_jira_auth(),
+        json={"fields": {
+            "project": {"key": JIRA_PROJECT},
+            "summary": summary,
+            "issuetype": {"id": JIRA_ISSUE_TYPE},
+            "priority": {"id": JIRA_PRIORITY},
+            "components": [{"id": component_id}],
+            "assignee": {"accountId": assignee_id},
+            "description": description,
+        }},
+        timeout=15,
+    )
+    data = resp.json()
+    key = data.get("key")
+    if not key:
+        print(f"ERROR creating Jira ticket: {data}")
+        return None
+    print(f"Created Jira ticket: {key}")
+    return key
 
-    if alerts:
-        blocks.append({
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": "*⚠️ Services at 90%+ utilization:*\n" + "\n".join(alerts)}
-        })
 
-    blocks.append({
-        "type": "context",
-        "elements": [{"type": "mrkdwn", "text": f"Source: `{basename}`"}]
-    })
-
-    return blocks
+def attach_to_jira(ticket_key, filepath):
+    with open(filepath, "rb") as f:
+        resp = requests.post(
+            f"{JIRA_BASE}/rest/api/3/issue/{ticket_key}/attachments",
+            auth=_jira_auth(),
+            headers={"X-Atlassian-Token": "no-check"},
+            files={"file": (os.path.basename(filepath), f)},
+            timeout=60,
+        )
+    data = resp.json()
+    if isinstance(data, list) and data:
+        print(f"Attached {data[0]['filename']} to {ticket_key}")
+    else:
+        print(f"ERROR attaching to {ticket_key}: {data}")
 
 
 # ---------------------------------------------------------------------------
 # Slack
 # ---------------------------------------------------------------------------
 
-def post_to_slack(blocks):
-    if not SLACK_BOT_TOKEN:
-        print("ERROR: SLACK_BOT_TOKEN environment variable not set.")
-        sys.exit(1)
+def _slack_user_id(email):
+    """Look up Slack user ID by email. Returns '<@ID>' or display name fallback."""
+    try:
+        resp = requests.get(
+            "https://slack.com/api/users.lookupByEmail",
+            headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}"},
+            params={"email": email},
+            timeout=10,
+        )
+        data = resp.json()
+        if data.get("ok"):
+            return f"<@{data['user']['id']}>"
+    except Exception:
+        pass
+    return email.split("@")[0]  # fallback to username
 
-    response = requests.post(
+
+def _usage_table(months, services, int_vals=True):
+    m1, m2, m3 = months
+    header = f"{'Service':<42} {m1:>5} {m2:>5} {m3:>5}  {'Sub':>6}  {'Util':>6}"
+    divider = "─" * len(header)
+    lines = [header, divider]
+    alerts = []
+    for s in services:
+        util_pct = f"{s['utilization']*100:.0f}%"
+        flag = " ⚠️" if s["utilization"] >= 0.90 else ""
+        if int_vals:
+            v1, v2, v3 = str(s["m1"]), str(s["m2"]), str(s["m3"])
+            sub = str(s["subscribed"])
+        else:
+            v1 = f"{s['m1']:.3f}".rstrip("0").rstrip(".")
+            v2 = f"{s['m2']:.3f}".rstrip("0").rstrip(".")
+            v3 = f"{s['m3']:.3f}".rstrip("0").rstrip(".")
+            sub = f"{s['subscribed']:.0f}"
+        lines.append(f"{s['name'][:42]:<42} {v1:>5} {v2:>5} {v3:>5}  {sub:>6}  {util_pct:>6}{flag}")
+        if s["utilization"] >= 0.90:
+            alerts.append(f"• *{s['name']}*: {util_pct} utilized")
+    return "\n".join(lines), alerts
+
+
+def post_combined_slack(
+    erp_file, erp_months, erp_services,
+    epm_file, epm_months, epbcs_services, fccs_edm_services,
+    erp_key, epbcs_key, fccs_edm_key,
+):
+    # Slack @mentions
+    mention_erp      = _slack_user_id(SLACK_USER_ERP)
+    mention_epbcs    = _slack_user_id(SLACK_USER_EPBCS)
+    mention_fccs_edm = _slack_user_id(SLACK_USER_FCCS_EDM)
+
+    jira_url = JIRA_BASE + "/browse"
+    ticket_line = (
+        f"<{jira_url}/{erp_key}|{erp_key}> ERP → {mention_erp}    "
+        f"<{jira_url}/{epbcs_key}|{epbcs_key}> EPBCS → {mention_epbcs}    "
+        f"<{jira_url}/{fccs_edm_key}|{fccs_edm_key}> FCCS-EDM → {mention_fccs_edm}"
+    )
+
+    erp_table, erp_alerts = _usage_table(
+        (erp_months[0], erp_months[1], erp_months[2]), erp_services, int_vals=True
+    )
+    epbcs_table, epbcs_alerts = _usage_table(epm_months, epbcs_services, int_vals=False)
+    fccs_table, fccs_alerts   = _usage_table(epm_months, fccs_edm_services, int_vals=False)
+
+    all_alerts = erp_alerts + epbcs_alerts + fccs_alerts
+
+    blocks = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": f"Oracle SaaS License Usage — {PREV_MONTH}"}
+        },
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": ticket_line}
+        },
+        {"type": "divider"},
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*ERP* — rolling 3 months: {erp_months[0]} / {erp_months[1]} / {erp_months[2]}\n```{erp_table}```"}
+        },
+        {"type": "divider"},
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*EPM / EPBCS* — rolling 3 months: {epm_months[0]} / {epm_months[1]} / {epm_months[2]}\n```{epbcs_table}```"}
+        },
+        {
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*EPM / FCCS-EDM* — rolling 3 months: {epm_months[0]} / {epm_months[1]} / {epm_months[2]}\n```{fccs_table}```"}
+        },
+    ]
+
+    if all_alerts:
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": "*⚠️ Services at 90%+ utilization:*\n" + "\n".join(all_alerts)}
+        })
+
+    blocks.append({
+        "type": "context",
+        "elements": [{"type": "mrkdwn", "text": (
+            f"ERP: `{os.path.basename(erp_file)}`  |  "
+            f"EPM: `{os.path.basename(epm_file)}`"
+        )}]
+    })
+
+    resp = requests.post(
         "https://slack.com/api/chat.postMessage",
         headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}", "Content-Type": "application/json"},
         json={"channel": SLACK_CHANNEL, "blocks": blocks},
         timeout=10,
     )
-    data = response.json()
+    data = resp.json()
     if not data.get("ok"):
         print(f"ERROR: Slack API error: {data.get('error')}")
         sys.exit(1)
-    print(f"Posted to {SLACK_CHANNEL} successfully.")
+    print(f"Posted combined summary to {SLACK_CHANNEL}")
 
 
 # ---------------------------------------------------------------------------
@@ -297,19 +364,59 @@ def post_to_slack(blocks):
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    # ERP
+    # --- Parse ERP ---
     erp_file = find_latest_erp_report()
     print(f"Parsing ERP: {os.path.basename(erp_file)}")
-    month1, month2, month3, erp_services = parse_erp_report(erp_file)
-    print(f"Found {len(erp_services)} ERP services. Months: {month1} / {month2} / {month3}")
-    post_to_slack(format_erp_slack_blocks(erp_file, month1, month2, month3, erp_services))
+    erp_m1, erp_m2, erp_m3, erp_services = parse_erp_report(erp_file)
+    print(f"  {len(erp_services)} services. Months: {erp_m1} / {erp_m2} / {erp_m3}")
 
-    # EPM
+    # --- Parse EPM ---
     epm_file = find_latest_epm_report()
-    if epm_file:
-        print(f"Parsing EPM: {os.path.basename(epm_file)}")
-        months, epm_services = parse_epm_report(epm_file)
-        print(f"Found {len(epm_services)} EPM services. Months: {months[0]} / {months[1]} / {months[2]}")
-        post_to_slack(format_epm_slack_blocks(epm_file, months, epm_services))
-    else:
-        print("No EPM report found, skipping.")
+    if not epm_file:
+        print("ERROR: No EPM report found.")
+        sys.exit(1)
+    print(f"Parsing EPM: {os.path.basename(epm_file)}")
+    epm_months, epm_services = parse_epm_report(epm_file)
+    epbcs_services, fccs_edm_services = _split_epm(epm_services)
+    print(f"  {len(epbcs_services)} EPBCS services, {len(fccs_edm_services)} FCCS-EDM services. Months: {'/'.join(epm_months)}")
+
+    # --- Create Jira tickets ---
+    erp_key = create_jira_ticket(
+        f"Monthly usage tracking ERP — {PREV_MONTH}",
+        JIRA_COMP_ERP, JIRA_ASSIGNEE_ERP,
+        _build_jira_desc(
+            f"Monthly Oracle ERP SaaS license usage review for {PREV_MONTH}. See attached Excel report.",
+            (erp_m1, erp_m2, erp_m3), erp_services,
+        ),
+    )
+    epbcs_key = create_jira_ticket(
+        f"Monthly usage tracking EPBCS — {PREV_MONTH}",
+        JIRA_COMP_EPBCS, JIRA_ASSIGNEE_EPBCS,
+        _build_jira_desc(
+            f"Monthly Oracle EPM/EPBCS SaaS license usage review for {PREV_MONTH}. See attached PDF report.",
+            epm_months, epbcs_services,
+        ),
+    )
+    fccs_edm_key = create_jira_ticket(
+        f"Monthly usage tracking FCCS-EDM — {PREV_MONTH}",
+        JIRA_COMP_FCCS_EDM, JIRA_ASSIGNEE_FCCS_EDM,
+        _build_jira_desc(
+            f"Monthly Oracle EPM/FCCS+EDM SaaS license usage review for {PREV_MONTH}. See attached PDF report.",
+            epm_months, fccs_edm_services,
+        ),
+    )
+
+    # --- Attach files ---
+    if erp_key:
+        attach_to_jira(erp_key, erp_file)
+    if epbcs_key:
+        attach_to_jira(epbcs_key, epm_file)
+    if fccs_edm_key:
+        attach_to_jira(fccs_edm_key, epm_file)
+
+    # --- Post to Slack ---
+    post_combined_slack(
+        erp_file, (erp_m1, erp_m2, erp_m3), erp_services,
+        epm_file, epm_months, epbcs_services, fccs_edm_services,
+        erp_key or "FBS-???", epbcs_key or "FBS-???", fccs_edm_key or "FBS-???",
+    )
