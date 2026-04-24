@@ -1,0 +1,3 @@
+# fbs-admin: Oracle SaaS usage report — runs 6th of every month at 08:00 UTC
+# Oracle uploads new files between the 4th-7th of each month
+0 8 6 * * /home/ubuntu/oci/cron/run_monthly.sh >> /var/log/fbs-admin.log 2>&1

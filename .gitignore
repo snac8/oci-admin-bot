@@ -1,0 +1,22 @@
+# Downloaded reports (may contain PII)
+saas-usage/
+
+# OCI private keys
+*.pem
+
+# Secrets
+*.env
+secrets.env
+.env
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+~$*
+
+# Logs
+*.log
