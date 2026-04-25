@@ -1,0 +1,60 @@
+name: Monthly Oracle SaaS Usage Report
+
+on:
+  schedule:
+    - cron: '0 8 6 * *'   # 6th of every month at 08:00 UTC
+  workflow_dispatch:        # allow manual trigger from GitHub UI
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    env:
+      SLACK_BOT_TOKEN:       ${{ secrets.SLACK_BOT_TOKEN }}
+      SLACK_CHANNEL:         ${{ secrets.SLACK_CHANNEL }}
+      SAAS_USAGE_DIR:        ${{ github.workspace }}/saas-usage
+      JIRA_EMAIL:            ${{ secrets.JIRA_EMAIL }}
+      JIRA_TOKEN:            ${{ secrets.JIRA_TOKEN }}
+      JIRA_ASSIGNEE_ERP:     ${{ secrets.JIRA_ASSIGNEE_ERP }}
+      JIRA_ASSIGNEE_EPBCS:   ${{ secrets.JIRA_ASSIGNEE_EPBCS }}
+      JIRA_ASSIGNEE_FCCS_EDM: ${{ secrets.JIRA_ASSIGNEE_FCCS_EDM }}
+      SLACK_USER_ERP:        ${{ secrets.SLACK_USER_ERP }}
+      SLACK_USER_EPBCS:      ${{ secrets.SLACK_USER_EPBCS }}
+      SLACK_USER_FCCS_EDM:   ${{ secrets.SLACK_USER_FCCS_EDM }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install OCI CLI
+        run: pip install oci-cli
+
+      - name: Configure OCI credentials
+        run: |
+          mkdir -p ~/.oci
+          echo "${{ secrets.OCI_KEY }}" > ~/.oci/snac_oci_license_usage_api.pem
+          chmod 600 ~/.oci/snac_oci_license_usage_api.pem
+          cat > ~/.oci/config << EOF
+          [DEFAULT]
+          user=${{ secrets.OCI_USER }}
+          fingerprint=${{ secrets.OCI_FINGERPRINT }}
+          key_file=~/.oci/snac_oci_license_usage_api.pem
+          tenancy=${{ secrets.OCI_TENANCY }}
+          region=${{ secrets.OCI_REGION }}
+          pass_phrase=${{ secrets.OCI_PASS_PHRASE }}
+          EOF
+          chmod 600 ~/.oci/config
+
+      - name: Download reports
+        run: bash download_saas_usage.sh
+
+      - name: Parse and notify
+        run: python3 parse_and_notify.py
