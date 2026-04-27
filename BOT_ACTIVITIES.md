@@ -8,13 +8,13 @@ All automated activities performed by the **fbs-admin** Slack bot in **#test-ai*
 
 | # | Activity | Trigger | Channel | Features / Functions |
 |---|----------|---------|---------|----------------------|
-| 1 | Monthly Oracle SaaS License Usage | 6th of each month | #test-ai | Downloads ERP (Excel) + EPM (PDF) reports from OCI · Parses utilization % · Creates 3 Jira tickets (ERP, EPBCS, FCCS-EDM) · Attaches reports to tickets · Posts usage summary table to Slack · ⚠ alerts at ≥90% utilization · Tags assignees |
-| 2 | Oracle Dev2 Quarterly Refresh | Quarterly (8th + 14th of Jan/Apr/Jul/Oct) | #test-ai | Submits OCI refresh (prod → dev2) · Posts 1-week reminder to Slack · Posts 24-hour advance notice · Weekend rule (Thu fallback) |
-| 3 | On-Demand Refresh via Slack | `@fbs-admin` mention anytime | #test-ai | Submits OCI refresh for any env on specified date/time · Cancels active refresh (thread) · Reschedules refresh (thread) · Queries next scheduled refresh time · Defaults to 5:00 PM PT |
-| 4 | Automatic Refresh Reminders (all envs) | Every 15 minutes | #test-ai | Auto-discovers refreshes across all 5 envs (bot or UI submitted) · Posts 1-week reminder · Posts 24-hour reminder + replies in 1-week thread · Posts completion notification on SUCCEEDED |
-| 5 | Quarterly Upgrade Maintenance Reminder | Daily at 9am PT | #test-ai | Queries all 6 envs for upcoming QUARTERLY_UPGRADE activities · Posts reminder when within 7 days · Groups envs sharing same window · Shows maintenance date/time in PT · Includes Oracle update name |
-| 6 | Oracle Quarterly Release Summary (KLO) | 1st of Jan/Apr/Jul/Oct at 9am PT | #test-ai | Creates Jira task in FBSPROJ under Oracle Quarterly Releases epic · P3 priority · Tags assignee (Jinesh) · Posts Slack reminder with ticket link |
-| 7 | OCI User Access Review | 1st of Jan/Apr/Jul/Oct at 9am PT | #test-ai | Exports full IDCS user list (475 users) to CSV · Creates Jira task under FBS-40319 epic (created once, reused forever) · Attaches CSV to Jira ticket · Posts Slack reminder with ticket link + user count · Tags assignee (Ramesh) |
+| 1 | Monthly Oracle SaaS License Usage | 6th of each month | #test-ai | • Downloads ERP (Excel) + EPM (PDF) reports from OCI<br>• Parses utilization % (3-month rolling)<br>• Creates 3 Jira tickets (ERP, EPBCS, FCCS-EDM)<br>• Attaches reports to tickets<br>• Posts usage summary table to Slack<br>• ⚠ alerts at ≥90% utilization<br>• Tags assignees |
+| 2 | Oracle Dev2 Quarterly Refresh | Quarterly (8th + 14th of Jan/Apr/Jul/Oct) | #test-ai | • Submits OCI refresh (prod → dev2)<br>• Posts 1-week reminder to Slack<br>• Posts 24-hour advance notice<br>• Weekend rule (Thu fallback) |
+| 3 | On-Demand Refresh via Slack | `@fbs-admin` mention anytime | #test-ai | • Submits OCI refresh for any env on specified date/time<br>• Cancels active refresh (thread command)<br>• Reschedules refresh (thread command)<br>• Queries next scheduled refresh time<br>• Defaults to 5:00 PM PT |
+| 4 | Automatic Refresh Reminders (all envs) | Every 15 minutes | #test-ai | • Auto-discovers refreshes across all 5 envs (bot or UI submitted)<br>• Posts 1-week reminder<br>• Posts 24-hour reminder + replies in 1-week thread<br>• Posts completion notification on SUCCEEDED |
+| 5 | Quarterly Upgrade Maintenance Reminder | Daily at 9am PT | #test-ai | • Queries all 6 envs for upcoming QUARTERLY_UPGRADE activities<br>• Posts reminder when within 7 days<br>• Groups envs sharing same maintenance window<br>• Shows date/time in PT (PDT/PST)<br>• Includes Oracle update name |
+| 6 | Oracle Quarterly Release Summary (KLO) | 1st of Jan/Apr/Jul/Oct at 9am PT | #test-ai | • Creates Jira task in FBSPROJ under Oracle Quarterly Releases epic<br>• P3 priority · Controllership component<br>• Posts Slack reminder with ticket link<br>• Tags assignee (Jinesh) |
+| 7 | OCI User Access Review | 1st of Jan/Apr/Jul/Oct at 9am PT | #test-ai | • Exports full IDCS user list (475 users) to CSV<br>• Creates Jira task under FBS-40319 epic (created once, reused forever)<br>• Attaches CSV to Jira ticket<br>• Posts Slack reminder with ticket link + user count<br>• Tags assignee (Ramesh) |
 
 ---
 
