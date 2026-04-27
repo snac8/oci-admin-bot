@@ -40,10 +40,10 @@ JIRA_EMAIL        = os.environ.get("JIRA_EMAIL", "sindhun@block.xyz")
 JIRA_TOKEN        = os.environ.get("JIRA_TOKEN", "")
 JIRA_PROJECT      = "FBS"
 JIRA_ISSUE_TYPE   = "10005"   # Task
-JIRA_PRIORITY     = "10005"   # P3
-JIRA_COMP_ERP         = "38102"
-JIRA_COMP_EPBCS       = "38103"
-JIRA_COMP_FCCS_EDM    = "38104"
+JIRA_PRIORITY     = "10004"   # P2 (Important)
+JIRA_COMPONENT    = "11221"   # Access - Oracle
+JIRA_EPIC         = "FBS-21188"  # Oracle SaaS Service Usage Review and Cleanup
+JIRA_SPRINT       = 1919         # FBS Operations Support
 JIRA_ASSIGNEE_ERP       = os.environ.get("JIRA_ASSIGNEE_ERP",       "712020:68edc5a8-7a36-4d36-9680-ea796a67a4d2")
 JIRA_ASSIGNEE_EPBCS     = os.environ.get("JIRA_ASSIGNEE_EPBCS",     "712020:68edc5a8-7a36-4d36-9680-ea796a67a4d2")
 JIRA_ASSIGNEE_FCCS_EDM  = os.environ.get("JIRA_ASSIGNEE_FCCS_EDM",  "712020:68edc5a8-7a36-4d36-9680-ea796a67a4d2")
@@ -255,18 +255,20 @@ def _build_jira_desc(intro, months, services, fmt_val=None):
     }
 
 
-def create_jira_ticket(summary, component_id, assignee_id, description):
+def create_jira_ticket(summary, assignee_id, description):
     resp = requests.post(
         f"{JIRA_BASE}/rest/api/3/issue",
         auth=_jira_auth(),
         json={"fields": {
-            "project": {"key": JIRA_PROJECT},
-            "summary": summary,
-            "issuetype": {"id": JIRA_ISSUE_TYPE},
-            "priority": {"id": JIRA_PRIORITY},
-            "components": [{"id": component_id}],
-            "assignee": {"accountId": assignee_id},
-            "description": description,
+            "project":           {"key": JIRA_PROJECT},
+            "summary":           summary,
+            "issuetype":         {"id": JIRA_ISSUE_TYPE},
+            "priority":          {"id": JIRA_PRIORITY},
+            "components":        [{"id": JIRA_COMPONENT}],
+            "assignee":          {"accountId": assignee_id},
+            "customfield_10014": JIRA_EPIC,
+            "customfield_10020": JIRA_SPRINT,
+            "description":       description,
         }},
         timeout=15,
     )
@@ -482,24 +484,24 @@ if __name__ == "__main__":
 
     # --- Create Jira tickets ---
     erp_key = create_jira_ticket(
-        f"Monthly usage tracking ERP — {PREV_MONTH}",
-        JIRA_COMP_ERP, JIRA_ASSIGNEE_ERP,
+        f"Monthly Oracle SaaS Usage Tracking - ERP - {PREV_MONTH}",
+        JIRA_ASSIGNEE_ERP,
         _build_jira_desc(
             f"Monthly Oracle ERP SaaS license usage review for {PREV_MONTH}. See attached Excel report.",
             (erp_m1, erp_m2, erp_m3), erp_services,
         ),
     )
     epbcs_key = create_jira_ticket(
-        f"Monthly usage tracking EPBCS — {PREV_MONTH}",
-        JIRA_COMP_EPBCS, JIRA_ASSIGNEE_EPBCS,
+        f"Monthly Oracle SaaS Usage Tracking - EPBCS - {PREV_MONTH}",
+        JIRA_ASSIGNEE_EPBCS,
         _build_jira_desc(
             f"Monthly Oracle EPM/EPBCS SaaS license usage review for {PREV_MONTH}. See attached PDF report.",
             epm_months, epbcs_services,
         ),
     )
     fccs_edm_key = create_jira_ticket(
-        f"Monthly usage tracking FCCS-EDM — {PREV_MONTH}",
-        JIRA_COMP_FCCS_EDM, JIRA_ASSIGNEE_FCCS_EDM,
+        f"Monthly Oracle SaaS Usage Tracking - FCCS-EDM - {PREV_MONTH}",
+        JIRA_ASSIGNEE_FCCS_EDM,
         _build_jira_desc(
             f"Monthly Oracle EPM/FCCS+EDM SaaS license usage review for {PREV_MONTH}. See attached PDF report.",
             epm_months, fccs_edm_services,

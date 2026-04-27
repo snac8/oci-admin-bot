@@ -1,0 +1,91 @@
+name: Dev2 Environment Refresh
+
+on:
+  schedule:
+    # 1-week reminder + OCI submit — 5am PT (12:00 UTC) on days 6-10 of Jan/Apr/Jul/Oct
+    - cron: '0 12 6-10 1,4,7,10 *'
+    # 24-hour notice — 9am PT (16:00 UTC) on days 12-16 of Jan/Apr/Jul/Oct (day before refresh)
+    - cron: '0 16 12-16 1,4,7,10 *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode'
+        required: true
+        default: 'force-reminder'
+        type: choice
+        options:
+          - force-reminder
+          - force-submit
+          - force-notify
+          - check-reminder
+          - check-notify
+      dry_run:
+        description: 'Dry run (skip actual OCI refresh call)'
+        type: boolean
+        default: true
+
+jobs:
+  dev2-refresh:
+    runs-on: ubuntu-latest
+
+    env:
+      SLACK_BOT_TOKEN:  ${{ secrets.SLACK_BOT_TOKEN }}
+      SLACK_CHANNEL:    ${{ secrets.SLACK_CHANNEL }}
+      SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+      DEV2_OCID:        ${{ secrets.DEV2_OCID }}
+      PROD_OCID:        ${{ secrets.PROD_OCID }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests python-dateutil
+
+      - name: Install OCI CLI
+        run: pip install oci-cli
+
+      - name: Configure OCI credentials
+        run: |
+          mkdir -p ~/.oci
+          echo "${{ secrets.OCI_KEY }}" > ~/.oci/snac_oci_license_usage_api.pem
+          chmod 600 ~/.oci/snac_oci_license_usage_api.pem
+          cat > ~/.oci/config << EOF
+          [DEFAULT]
+          user=${{ secrets.OCI_USER }}
+          fingerprint=${{ secrets.OCI_FINGERPRINT }}
+          key_file=~/.oci/snac_oci_license_usage_api.pem
+          tenancy=${{ secrets.OCI_TENANCY }}
+          region=${{ secrets.OCI_REGION }}
+          pass_phrase=${{ secrets.OCI_PASS_PHRASE }}
+          EOF
+          chmod 600 ~/.oci/config
+
+      - name: Determine run mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "mode=${{ github.event.inputs.mode }}" >> $GITHUB_OUTPUT
+            echo "dry_run=${{ github.event.inputs.dry_run }}" >> $GITHUB_OUTPUT
+          else
+            # Scheduled: pick mode based on UTC hour
+            HOUR=$(date -u +%H)
+            DAY=$(date -u +%-d)
+            if [ "$HOUR" = "12" ] && [ "$DAY" -ge 6 ] && [ "$DAY" -le 10 ]; then
+              echo "mode=check-reminder" >> $GITHUB_OUTPUT
+            else
+              echo "mode=check-notify" >> $GITHUB_OUTPUT
+            fi
+            echo "dry_run=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Run dev2 refresh script
+        run: |
+          DRY=""
+          if [ "${{ steps.mode.outputs.dry_run }}" = "true" ]; then DRY="--dry-run"; fi
+          python3 dev2_refresh.py --mode ${{ steps.mode.outputs.mode }} $DRY

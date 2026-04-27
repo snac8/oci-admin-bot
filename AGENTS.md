@@ -66,13 +66,20 @@ Add any other reminders the bot should send below. Each reminder should specify:
 
 ---
 
-### Reminder 2: _(add your reminder here)_
+### Reminder 2: Oracle Dev2 Environment Refresh
 
-- **What**:
-- **When**:
-- **Channel**:
-- **Who**:
-- **Message**:
+- **What**: Submit a full refresh of the dev2 Oracle Fusion environment (copies prod → dev2)
+- **When**: Quarterly — 15th of January, April, July, October. If the 15th falls on a Saturday or Sunday, run on the Thursday before instead. Same weekend rule applies to the 1-week advance reminder.
+- **Channel**: #test-ai
+- **Who**: No Jira ticket — Slack only
+- **Environments**:
+  - Source (prod): `ocid1.fusionenvironment.oc1.iad.aaaaaaaanw7ctvqo7mmgwd36qnljr7j4p5ll2y4eaty4i6726b2thvg7orda`
+  - Target (dev2): `ocid1.fusionenvironment.oc1.iad.aaaaaaaa3634hbx5ae7c2xi2sgjki47iytboyenewerpxizsq2ijwkjdlldq`
+  - Dev2 URL: https://ehsg-dev2.login.us6.oraclecloud.com/
+- **Schedule**:
+  1. **1 week before** (8th, or Thursday if weekend): Slack notice that dev2 refresh is planned for the 15th
+  2. **Day of at 5am PT**: Submit OCI refresh request automatically
+  3. **Day of at 9am PT**: Slack notification confirming refresh was submitted
 
 ---
 
