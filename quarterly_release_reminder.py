@@ -110,7 +110,7 @@ def post_slack(quarter_label: str, ticket_key: str, mention: str) -> None:
     blocks = [
         {
             "type": "header",
-            "text": {"type": "plain_text", "text": f"Reminder - Oracle {quarter_label} Quarterly Release Summary"}
+            "text": {"type": "plain_text", "text": f"Reminder - Review Oracle {quarter_label} quarterly release notes"}
         },
         {
             "type": "section",
