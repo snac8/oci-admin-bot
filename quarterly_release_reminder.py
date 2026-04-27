@@ -151,11 +151,6 @@ def main():
 
     mention = slack_user_id(JINESH_EMAIL)
 
-    if args.mode == "force":
-        print("Force mode — skipping ticket creation.")
-        post_slack(quarter_label, mention)
-        return
-
     ticket_key = create_jira_ticket(quarter_label)
     if not ticket_key:
         sys.exit(1)
