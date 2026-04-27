@@ -43,7 +43,12 @@ JIRA_EPIC_SUMMARY = "OCI User Access Review and Cleanup"
 RAMESH_ACCOUNT_ID = "63572d1d548f1fe6f0c5b44a"   # rkoduri@block.xyz
 RAMESH_EMAIL      = "rkoduri@block.xyz"
 
+IDCS_ENDPOINT  = "https://idcs-bd160fc37be34d88a783a331e2f091c7.identity.oraclecloud.com"
 QUARTER_MONTHS = {1: "Q1", 4: "Q2", 7: "Q3", 10: "Q4"}
+OCI_NAMESPACE  = "axbix6knqxie"
+OCI_BUCKET     = "fbs-admin-state"
+EPIC_STATE_OBJ = "oci_access_review_epic.json"
+EPIC_STATE_FILE = "/tmp/oci_access_review_epic.json"
 
 
 # ---------------------------------------------------------------------------
@@ -80,33 +85,38 @@ def slack_mention(email: str) -> str:
 # ---------------------------------------------------------------------------
 
 def export_oci_users(csv_path: str) -> int:
-    """Export OCI IAM users to CSV. Returns number of users written."""
+    """Export all IDCS users to CSV. Returns number of users written."""
     result = subprocess.run(
-        ["oci", "iam", "user", "list", "--all"],
+        ["oci", "--endpoint", IDCS_ENDPOINT,
+         "identity-domains", "users", "list", "--all"],
         capture_output=True, text=True,
     )
     if result.returncode != 0:
-        print(f"ERROR fetching OCI users: {result.stderr.strip()}")
+        print(f"ERROR fetching IDCS users: {result.stderr.strip()}")
         sys.exit(1)
 
-    users = json.loads(result.stdout).get("data", [])
+    users = json.loads(result.stdout).get("data", {}).get("resources", [])
 
     with open(csv_path, "w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow([
-            "Username", "Email", "Status", "MFA Enabled",
-            "Last Login (UTC)", "Created (UTC)",
+            "Username", "Display Name", "Email", "Status",
+            "User Type", "Created (UTC)", "Last Modified (UTC)",
         ])
-        for u in sorted(users, key=lambda x: x.get("name", "")):
-            name = u.get("name", "").replace("oracleidentitycloudservice/", "")
-            email = u.get("email") or name
-            status = u.get("lifecycle-state", "")
-            mfa = "Yes" if u.get("is-mfa-activated") else "No"
-            last_login = (u.get("last-successful-login-time") or "")[:19].replace("T", " ")
-            created = (u.get("time-created") or "")[:19].replace("T", " ")
-            writer.writerow([name, email, status, mfa, last_login, created])
+        for u in sorted(users, key=lambda x: x.get("user-name", "")):
+            username    = u.get("user-name", "")
+            display     = u.get("display-name", "")
+            emails      = u.get("emails") or []
+            email       = next((e["value"] for e in emails if e.get("primary")), username)
+            status      = "Active" if u.get("active") else "Inactive"
+            user_type   = u.get("user-type") or "N/A"
+            meta        = u.get("meta") or {}
+            created     = (meta.get("created") or "")[:19].replace("T", " ")
+            last_mod    = (meta.get("last-modified") or "")[:19].replace("T", " ")
+            writer.writerow([username, display, email, status, user_type, created, last_mod])
 
-    print(f"Exported {len(users)} OCI users to {csv_path}")
+    active = sum(1 for u in users if u.get("active"))
+    print(f"Exported {len(users)} IDCS users ({active} active) to {csv_path}")
     return len(users)
 
 
@@ -114,23 +124,47 @@ def export_oci_users(csv_path: str) -> int:
 # Jira
 # ---------------------------------------------------------------------------
 
-def get_or_create_epic() -> str:
-    """Return the epic key, creating it if it doesn't exist yet."""
-    # Search for existing epic
-    jql = f'project=FBS AND issuetype=Epic AND summary~"{JIRA_EPIC_SUMMARY}"'
-    resp = requests.get(
-        f"{JIRA_BASE}/rest/api/3/issue/search",
-        auth=_jira_auth(),
-        params={"jql": jql, "fields": "summary,key"},
-        timeout=15,
-    )
-    issues = resp.json().get("issues", [])
-    if issues:
-        key = issues[0]["key"]
-        print(f"Reusing existing epic: {key} — {issues[0]['fields']['summary']}")
-        return key
+def load_epic_key() -> str | None:
+    """Load the stored epic key from OCI Object Storage."""
+    result = subprocess.run([
+        "oci", "os", "object", "get",
+        "--namespace", OCI_NAMESPACE,
+        "--bucket-name", OCI_BUCKET,
+        "--name", EPIC_STATE_OBJ,
+        "--file", EPIC_STATE_FILE,
+    ], capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
+    try:
+        with open(EPIC_STATE_FILE) as f:
+            return json.load(f).get("epic_key")
+    except Exception:
+        return None
 
-    # Create it
+
+def save_epic_key(epic_key: str):
+    """Persist the epic key to OCI Object Storage."""
+    with open(EPIC_STATE_FILE, "w") as f:
+        json.dump({"epic_key": epic_key, "summary": JIRA_EPIC_SUMMARY}, f)
+    result = subprocess.run([
+        "oci", "os", "object", "put",
+        "--namespace", OCI_NAMESPACE,
+        "--bucket-name", OCI_BUCKET,
+        "--name", EPIC_STATE_OBJ,
+        "--file", EPIC_STATE_FILE,
+        "--force",
+    ], capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"WARNING: could not save epic key to OCI: {result.stderr.strip()}")
+
+
+def get_or_create_epic() -> str:
+    """Return the epic key, creating it only once and persisting for future runs."""
+    existing = load_epic_key()
+    if existing:
+        print(f"Reusing existing epic: {existing}")
+        return existing
+
     body = {
         "fields": {
             "project":    {"key": JIRA_PROJECT},
@@ -152,6 +186,7 @@ def get_or_create_epic() -> str:
         print(f"ERROR creating epic: {data}")
         sys.exit(1)
     print(f"Created new epic: {key} — {JIRA_EPIC_SUMMARY}")
+    save_epic_key(key)
     return key
 
 
