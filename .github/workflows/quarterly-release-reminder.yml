@@ -1,0 +1,43 @@
+name: Quarterly Oracle Release Reminder
+
+on:
+  schedule:
+    # 9am PT (16:00 UTC) on the 1st of Jan, Apr, Jul, Oct
+    - cron: '0 16 1 1,4,7,10 *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode'
+        required: true
+        default: 'force'
+        type: choice
+        options:
+          - check
+          - force
+
+jobs:
+  quarterly-release-reminder:
+    runs-on: ubuntu-latest
+
+    env:
+      SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+      SLACK_CHANNEL:   ${{ secrets.SLACK_CHANNEL }}
+      JIRA_EMAIL:      ${{ secrets.JIRA_EMAIL }}
+      JIRA_TOKEN:      ${{ secrets.JIRA_TOKEN }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run quarterly release reminder
+        run: |
+          MODE="${{ github.event.inputs.mode || 'check' }}"
+          python3 quarterly_release_reminder.py --mode "$MODE"
