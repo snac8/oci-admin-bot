@@ -13,6 +13,7 @@ All automated activities performed by the **fbs-admin** Slack bot in **#test-ai*
 | 3 | On-Demand Refresh via Slack | `@fbs-admin` mention anytime | #test-ai |
 | 4 | Automatic Refresh Reminders (all envs) | Every 15 minutes | #test-ai |
 | 5 | Quarterly Upgrade Maintenance Reminder | Daily at 9am PT | #test-ai |
+| 6 | Oracle Quarterly Release Summary (KLO) | 1st of Jan/Apr/Jul/Oct at 9am PT | #test-ai |
 
 ---
 
@@ -153,13 +154,51 @@ All commands reply in-thread with Request ID, scheduled date/time, and environme
 
 ---
 
+## 6. Oracle Quarterly Release Summary (KLO)
+
+**Script:** `quarterly_release_reminder.py`
+**Schedule:** 1st of January, April, July, October at 9am PT (GitHub Actions: `.github/workflows/quarterly-release-reminder.yml`)
+
+### What it does
+- Creates a Jira ticket in project **FBSPROJ** for the Oracle quarterly release summary
+- Posts a Slack reminder to **#test-ai** mentioning Jinesh Kumar
+
+### Jira ticket settings
+
+| Field | Value |
+|-------|-------|
+| Project | FBSPROJ |
+| Title | `KLO: {quarter} Release Summary` (e.g. KLO: 26B Release Summary) |
+| Issue type | Task |
+| Priority | P3 |
+| Component | Controllership |
+| Parent epic | [FBSPROJ-2135](https://block.atlassian.net/browse/FBSPROJ-2135) — Oracle Quarterly Releases |
+| Assignee | Jinesh Kumar (jinesh@block.xyz) |
+
+### Oracle quarter labels
+
+| Month | Label | Example |
+|-------|-------|---------|
+| January | A | 26A |
+| April | B | 26B |
+| July | C | 26C |
+| October | D | 26D |
+
+### Run modes (manual trigger)
+| Mode | Description |
+|------|-------------|
+| `check` | Create ticket + post only if today is the 1st of a quarter month (default) |
+| `force` | Always create ticket + post (for testing) |
+
+---
+
 ## Infrastructure
 
 | Item | Value |
 |------|-------|
-| GitHub repo | github.com/snac8/fbs-admin-bot |
+| GitHub repo | github.com/snac8/oci-admin-bot |
 | OCI state bucket | `axbix6knqxie / fbs-admin-state` |
-| Jira project | FBS |
-| Jira epic | [FBS-21188](https://block.atlassian.net/browse/FBS-21188) — Oracle SaaS Service Usage Review and Cleanup |
+| Jira project (SaaS usage) | FBS — epic [FBS-21188](https://block.atlassian.net/browse/FBS-21188) Oracle SaaS Service Usage Review and Cleanup |
+| Jira project (quarterly release) | FBSPROJ — epic [FBSPROJ-2135](https://block.atlassian.net/browse/FBSPROJ-2135) Oracle Quarterly Releases |
 | Slack channel | #test-ai (C0ALU5462EB) |
 | Secrets location | `/etc/fbs-admin/secrets.env` |
