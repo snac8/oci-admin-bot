@@ -286,12 +286,12 @@ def upload_slack_file(csv_path: str, label: str) -> str | None:
 def post_slack(label: str, ticket_key: str, user_count: int, mention: str, file_permalink: str = None):
     ticket_url = f"{JIRA_BASE}/browse/{ticket_key}"
     body = (
-        f"{mention} please review and action the OCI user access list for *{label}*.\n\n"
-        f"*Users exported:* {user_count}\n"
         f"*Jira ticket:* <{ticket_url}|{ticket_key}>\n"
+        f"*Users exported:* {user_count}\n"
+        f"*Assignee:* {mention}"
     )
     if file_permalink:
-        body += f"*User list:* <{file_permalink}|Download CSV>"
+        body += f"\n*User list:* <{file_permalink}|Download CSV>"
 
     blocks = [
         {
