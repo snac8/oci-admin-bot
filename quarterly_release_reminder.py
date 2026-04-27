@@ -105,8 +105,10 @@ def create_jira_ticket(quarter_label: str) -> str | None:
     return key
 
 
-def post_slack(quarter_label: str, ticket_key: str, mention: str) -> None:
-    ticket_url = f"{JIRA_BASE}/browse/{ticket_key}"
+def post_slack(quarter_label: str, mention: str, ticket_key: str = None) -> None:
+    body = f"{mention} please review and document the *Oracle {quarter_label}* quarterly release."
+    if ticket_key:
+        body += f"\n\nJira ticket: <{JIRA_BASE}/browse/{ticket_key}|{ticket_key}>"
     blocks = [
         {
             "type": "header",
@@ -114,11 +116,7 @@ def post_slack(quarter_label: str, ticket_key: str, mention: str) -> None:
         },
         {
             "type": "section",
-            "text": {"type": "mrkdwn", "text": (
-                f"{mention} please review and document the *Oracle {quarter_label}* quarterly release.\n\n"
-                f"Jira ticket: <{ticket_url}|{ticket_key}>\n"
-                f"Epic: <{JIRA_BASE}/browse/{JIRA_PARENT}|{JIRA_PARENT}> — Oracle Quarterly Releases"
-            )}
+            "text": {"type": "mrkdwn", "text": body}
         },
     ]
     resp = requests.post(
@@ -151,12 +149,17 @@ def main():
         print("Not the 1st of a quarter month — nothing to do.")
         return
 
+    mention = slack_user_id(JINESH_EMAIL)
+
+    if args.mode == "force":
+        print("Force mode — skipping ticket creation.")
+        post_slack(quarter_label, mention)
+        return
+
     ticket_key = create_jira_ticket(quarter_label)
     if not ticket_key:
         sys.exit(1)
-
-    mention = slack_user_id(JINESH_EMAIL)
-    post_slack(quarter_label, ticket_key, mention)
+    post_slack(quarter_label, mention, ticket_key=ticket_key)
 
 
 if __name__ == "__main__":
