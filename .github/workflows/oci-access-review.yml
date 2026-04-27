@@ -1,0 +1,63 @@
+name: OCI User Access Review
+
+on:
+  schedule:
+    # 9am PT (16:00 UTC) on the 1st of Jan, Apr, Jul, Oct
+    - cron: '0 16 1 1,4,7,10 *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode'
+        required: true
+        default: 'force'
+        type: choice
+        options:
+          - check
+          - force
+
+jobs:
+  oci-access-review:
+    runs-on: ubuntu-latest
+
+    env:
+      SLACK_BOT_TOKEN:  ${{ secrets.SLACK_BOT_TOKEN }}
+      SLACK_CHANNEL:    ${{ secrets.SLACK_CHANNEL }}
+      SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+      JIRA_EMAIL:       ${{ secrets.JIRA_EMAIL }}
+      JIRA_TOKEN:       ${{ secrets.JIRA_TOKEN }}
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Install OCI CLI
+        run: pip install oci-cli
+
+      - name: Configure OCI credentials
+        run: |
+          mkdir -p ~/.oci
+          echo "${{ secrets.OCI_KEY }}" > ~/.oci/snac_oci_license_usage_api.pem
+          chmod 600 ~/.oci/snac_oci_license_usage_api.pem
+          cat > ~/.oci/config << EOF
+          [DEFAULT]
+          user=${{ secrets.OCI_USER }}
+          fingerprint=${{ secrets.OCI_FINGERPRINT }}
+          key_file=~/.oci/snac_oci_license_usage_api.pem
+          tenancy=${{ secrets.OCI_TENANCY }}
+          region=${{ secrets.OCI_REGION }}
+          pass_phrase=${{ secrets.OCI_PASS_PHRASE }}
+          EOF
+          chmod 600 ~/.oci/config
+
+      - name: Run OCI access review
+        run: |
+          MODE="${{ github.event.inputs.mode || 'check' }}"
+          python3 oci_access_review.py --mode "$MODE"
