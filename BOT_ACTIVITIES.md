@@ -14,6 +14,7 @@ All automated activities performed by the **fbs-admin** Slack bot in **#test-ai*
 | 4 | Automatic Refresh Reminders (all envs) | Every 15 minutes | #test-ai |
 | 5 | Quarterly Upgrade Maintenance Reminder | Daily at 9am PT | #test-ai |
 | 6 | Oracle Quarterly Release Summary (KLO) | 1st of Jan/Apr/Jul/Oct at 9am PT | #test-ai |
+| 7 | OCI User Access Review | 1st of Jan/Apr/Jul/Oct at 9am PT | #test-ai |
 
 ---
 
@@ -192,6 +193,44 @@ All commands reply in-thread with Request ID, scheduled date/time, and environme
 
 ---
 
+## 7. OCI User Access Review
+
+**Script:** `oci_access_review.py`
+**Schedule:** 1st of January, April, July, October at 9am PT (GitHub Actions: `.github/workflows/oci-access-review.yml`)
+
+### What it does
+- Exports all IDCS users (475) from OracleIdentityCloudService via `oci identity-domains users list --all`
+- Ensures the Jira epic **"OCI User Access Review and Cleanup"** exists — creates it once, reuses forever (key stored in OCI Object Storage)
+- Creates a Jira task under that epic, assigned to Ramesh Koduri
+- Attaches the CSV user list to the Jira ticket
+- Posts a Slack reminder to **#test-ai** mentioning Ramesh
+
+### Jira ticket settings
+
+| Field | Value |
+|-------|-------|
+| Project | FBS |
+| Title | `OCI User Access Cleanup - {Month Year}` (e.g. OCI User Access Cleanup - April 2026) |
+| Issue type | Task |
+| Priority | P2 |
+| Component | Access - Oracle |
+| Sprint | FBS Operations Support |
+| Parent epic | Created once, stored in OCI state (`oci_access_review_epic.json`) |
+| Assignee | Ramesh Koduri (rkoduri@block.xyz) |
+
+### Slack post includes
+- Jira ticket link
+- Number of users exported
+- Assignee @mention
+
+### Run modes (manual trigger)
+| Mode | Description |
+|------|-------------|
+| `check` | Run only if today is the 1st of a quarter month (default) |
+| `force` | Always run (for testing) |
+
+---
+
 ## Infrastructure
 
 | Item | Value |
@@ -199,6 +238,7 @@ All commands reply in-thread with Request ID, scheduled date/time, and environme
 | GitHub repo | github.com/snac8/oci-admin-bot |
 | OCI state bucket | `axbix6knqxie / fbs-admin-state` |
 | Jira project (SaaS usage) | FBS — epic [FBS-21188](https://block.atlassian.net/browse/FBS-21188) Oracle SaaS Service Usage Review and Cleanup |
+| Jira project (OCI access review) | FBS — epic [FBS-40319](https://block.atlassian.net/browse/FBS-40319) OCI User Access Review and Cleanup |
 | Jira project (quarterly release) | FBSPROJ — epic [FBSPROJ-2135](https://block.atlassian.net/browse/FBSPROJ-2135) Oracle Quarterly Releases |
 | Slack channel | #test-ai (C0ALU5462EB) |
 | Secrets location | `/etc/fbs-admin/secrets.env` |
