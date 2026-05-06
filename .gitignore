@@ -1,0 +1,32 @@
+# Downloaded reports (may contain PII)
+saas-usage/
+
+# OCI private keys
+*.pem
+oci_api_key*
+
+# Secrets
+*.env
+secrets.env
+.env
+!.env.example
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# macOS
+.DS_Store
+~$*
+
+# Editors
+.idea/
+.vscode/
+
+# Logs / state
+*.log
+oci_access_review_epic.json
+dev2_refresh_state.json
